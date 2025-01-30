@@ -1,0 +1,64 @@
+- name: Backup Script and Keep Only Last 3
+  hosts: localhost
+  # Create variables for backup and source directories
+  vars:
+    backup_dir: "{{ ansible_env.HOME }}/backup_archive"
+    source_dir: "{{ ansible_env.HOME }}/test123"
+
+  tasks:
+    # Ensure backup parent '~/back_archive' directory exists
+    - name: Ensure backup parent '~/back_archive' directory exists
+      ansible.builtin.file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: "0755"
+    # Initialize timestamp variable
+    - name: Generate timestamp format year-month-day-hour-minute-second
+      set_fact:
+        timestamp: "{{ ansible_date_time.year }}{{ ansible_date_time.month }}{{ ansible_date_time.day }}{{ ansible_date_time.hour }}{{ ansible_date_time.minute }}{{ ansible_date_time.second }}"
+
+    # Create a backup directory with the name of backup_archive_<timestamp>
+    - name: Create a timestamped backup directory
+      ansible.builtin.file:
+        path: "{{ backup_dir }}/backup_archive_{{ timestamp }}"
+        state: directory
+        mode: '0755'
+
+    # Copy files from ~/personal folder to ~/backup_archive_<timestamp> folder
+    - name: Copy files from source to the new backup directory
+      ansible.builtin.copy:
+        src: "{{ source_dir }}/"
+        dest: "{{ backup_dir }}/backup_archive_{{ timestamp }}/"
+        remote_src: yes
+
+    # Search for all existing backup directories with the pattern backup_archive_*
+    - name: Find all existing backup directories
+      ansible.builtin.find:
+        paths: "{{ backup_dir }}"
+        patterns: "backup_archive_*"
+        file_type: directory
+        recurse: no
+      register: backups
+
+    # Make sure the backups are sorted by timestamp
+    - name: Ensure backups list is sorted
+      set_fact:
+        sorted_backups: "{{ backups.files | sort(attribute='mtime', reverse=true) }}"
+
+    # Display all backups (sorted by timestamp)
+    - name: Display all backups (sorted by mtime)
+      debug:
+        msg: "Sorted backups: {{ sorted_backups | map(attribute='path') | list }}"
+
+    # Display the number of backups
+    - name: Check if more than 3 backups exist
+      debug:
+        msg: "Number of backups: {{ backups.files | length }}"
+
+    # Delete the older backups if more than 3 exists, keep only the last 3
+    - name: Delete older backups if more than 3 exist
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ sorted_backups[3:] }}"  # Deletes backups after the 3 newest
+      when: backups.files | length > 3
